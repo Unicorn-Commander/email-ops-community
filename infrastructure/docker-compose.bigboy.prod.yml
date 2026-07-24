@@ -1,0 +1,109 @@
+# =====================================================================
+# Email-Ops — bigboy deploy (prod customer: email-ops.unicorncommander.ai)
+#
+# Run from the repo root on bigboy:
+#   docker compose -f infrastructure/docker-compose.bigboy.prod.yml \
+#     --env-file infrastructure/.env.bigboy.prod up -d --build
+# =====================================================================
+name: email-ops-prod
+
+services:
+  email-ops-prod-postgres:
+    image: postgres:16-bookworm
+    container_name: email-ops-prod-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: email_ops_admin
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in infrastructure/.env.bigboy.prod}
+      POSTGRES_DB: emailops
+    volumes:
+      - email-ops-prod-pgdata:/var/lib/postgresql/data
+      - ./database/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U email_ops_admin -d emailops"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    networks: [email-ops-prod-internal]
+
+  email-ops-prod-engine:
+    build:
+      context: ../cleaner-engine
+    image: email-ops-prod-engine:latest
+    container_name: email-ops-prod-engine
+    restart: unless-stopped
+    env_file: .env.bigboy.prod
+    environment:
+      AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)\""]
+      interval: 30s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+    networks: [email-ops-prod-internal, unicorn-network]
+
+  email-ops-prod-backend:
+    build:
+      context: ../backend
+    image: email-ops-prod-backend:latest
+    container_name: email-ops-prod-backend
+    restart: unless-stopped
+    env_file: .env.bigboy.prod
+    environment:
+      DATABASE_URL: postgresql://email_ops_app:${EMAIL_OPS_APP_PASSWORD:?set EMAIL_OPS_APP_PASSWORD in infrastructure/.env.bigboy.prod}@email-ops-prod-postgres:5432/emailops?schema=public
+      ADMIN_DATABASE_URL: postgresql://email_ops_admin:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in infrastructure/.env.bigboy.prod}@email-ops-prod-postgres:5432/emailops?schema=public
+      CLEANER_ENGINE_URL: http://email-ops-prod-engine:8000
+      PORT: "3231"
+      API_PREFIX: api/v1
+      NODE_ENV: production
+    depends_on:
+      email-ops-prod-postgres:
+        condition: service_healthy
+      email-ops-prod-engine:
+        condition: service_started
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=web"
+      - "traefik.http.routers.email-ops-prod-backend.rule=Host(`email-ops.unicorncommander.ai`) && PathPrefix(`/api`)"
+      - "traefik.http.routers.email-ops-prod-backend.priority=100"
+      - "traefik.http.routers.email-ops-prod-backend.entrypoints=websecure"
+      - "traefik.http.routers.email-ops-prod-backend.tls=true"
+      - "traefik.http.routers.email-ops-prod-backend.tls.certresolver=letsencrypt"
+      - "traefik.http.services.email-ops-prod-backend.loadbalancer.server.port=3231"
+    networks: [email-ops-prod-internal, unicorn-network, web]
+
+  email-ops-prod-frontend:
+    build:
+      context: ../frontend
+    image: email-ops-prod-frontend:latest
+    container_name: email-ops-prod-frontend
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+    depends_on:
+      email-ops-prod-backend:
+        condition: service_started
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=web"
+      - "traefik.http.routers.email-ops-prod-frontend.rule=Host(`email-ops.unicorncommander.ai`)"
+      - "traefik.http.routers.email-ops-prod-frontend.entrypoints=websecure"
+      - "traefik.http.routers.email-ops-prod-frontend.tls=true"
+      - "traefik.http.routers.email-ops-prod-frontend.tls.certresolver=letsencrypt"
+      - "traefik.http.services.email-ops-prod-frontend.loadbalancer.server.port=3000"
+    networks: [email-ops-prod-internal, web]
+
+volumes:
+  email-ops-prod-pgdata:
+
+networks:
+  email-ops-prod-internal:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.210.0.0/24
+  web:
+    external: true
+  unicorn-network:
+    external: true

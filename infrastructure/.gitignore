@@ -1,0 +1,5 @@
+# Filled deploy secrets — never commit. The .example template is tracked.
+.env.bigboy
+.env.bigboy.*
+!.env.bigboy.example
+!.env.bigboy.prod.example

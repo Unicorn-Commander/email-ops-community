@@ -1,0 +1,20 @@
+# Email-Ops OSS — gitleaks config.
+# Extends the default ruleset. The allowlist below covers vetted, reviewed
+# NON-secret placeholders and localhost test fixtures (reviewed 2026-07-24;
+# trufflehog --only-verified reported 0). A NEW real (high-entropy) secret
+# still trips, because these regexes only match the known placeholder strings.
+title = "email-ops-oss"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Vetted non-secret placeholders + localhost test fixtures"
+regexes = [
+  '''super-secret''',
+  '''user:secret@''',
+  '''\[POSTGRES_PASSWORD\]''',
+  '''\[OWNER_PASSWORD\]''',
+  '''\[GENERATE_64_BYTE_SECRET\]''',
+  '''postgres:postgres@''',
+]

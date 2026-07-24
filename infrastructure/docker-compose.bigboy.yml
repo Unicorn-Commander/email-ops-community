@@ -1,0 +1,115 @@
+# =====================================================================
+# Email-Ops — bigboy deploy (internal: email-ops.magicunicorn.dev)
+#
+# Run from the repo root on bigboy:
+#   docker compose -f infrastructure/docker-compose.bigboy.yml \
+#     --env-file infrastructure/.env.bigboy up -d --build
+#
+# Suite convention (matches customer-ops): Traefik on the external `web`
+# network terminates TLS (letsencrypt) and routes:
+#   Host(email-ops.magicunicorn.dev)                      -> frontend:3000
+#   Host(email-ops.magicunicorn.dev) && PathPrefix(/api)  -> backend:3231
+# Backend + engine join `unicorn-network` to reach Garage (unicorn-garage:3900).
+# Postgres stays on the private internal network only.
+# =====================================================================
+name: email-ops
+
+services:
+  email-ops-postgres:
+    image: postgres:16-bookworm
+    container_name: email-ops-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: email_ops_admin
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in infrastructure/.env.bigboy}
+      POSTGRES_DB: emailops
+    volumes:
+      - email-ops-pgdata:/var/lib/postgresql/data
+      - ./database/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U email_ops_admin -d emailops"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    networks: [email-ops-internal]
+
+  email-ops-engine:
+    build:
+      context: ../cleaner-engine
+    image: email-ops-engine:latest
+    container_name: email-ops-engine
+    restart: unless-stopped
+    env_file: .env.bigboy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)\""]
+      interval: 30s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+    networks: [email-ops-internal, unicorn-network]
+
+  email-ops-backend:
+    build:
+      context: ../backend
+    image: email-ops-backend:latest
+    container_name: email-ops-backend
+    restart: unless-stopped
+    env_file: .env.bigboy
+    environment:
+      # Inter-container wiring — fixed; do NOT duplicate in .env.bigboy.
+      # (GARAGE_S3_ENDPOINT lives in .env.bigboy so the engine gets it too.)
+      DATABASE_URL: ${DATABASE_URL:-postgresql://email_ops_admin:${POSTGRES_PASSWORD}@email-ops-postgres:5432/emailops?schema=public}
+      ADMIN_DATABASE_URL: postgresql://email_ops_admin:${POSTGRES_PASSWORD}@email-ops-postgres:5432/emailops?schema=public
+      CLEANER_ENGINE_URL: http://email-ops-engine:8000
+      PORT: "3231"
+      API_PREFIX: api/v1
+      NODE_ENV: production
+    depends_on:
+      email-ops-postgres:
+        condition: service_healthy
+      email-ops-engine:
+        condition: service_started
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=web"
+      - "traefik.http.routers.email-ops-backend.rule=Host(`email-ops.magicunicorn.dev`) && PathPrefix(`/api`)"
+      - "traefik.http.routers.email-ops-backend.priority=100"
+      - "traefik.http.routers.email-ops-backend.entrypoints=websecure"
+      - "traefik.http.routers.email-ops-backend.tls=true"
+      - "traefik.http.routers.email-ops-backend.tls.certresolver=letsencrypt"
+      - "traefik.http.services.email-ops-backend.loadbalancer.server.port=3231"
+    networks: [email-ops-internal, unicorn-network, web]
+
+  email-ops-frontend:
+    build:
+      context: ../frontend
+    image: email-ops-frontend:latest
+    container_name: email-ops-frontend
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      # /api is served same-origin via Traefik PathPrefix -> backend, so the
+      # browser calls relative /api/v1 (lib/api.ts default). No proxy needed.
+    depends_on:
+      email-ops-backend:
+        condition: service_started
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=web"
+      - "traefik.http.routers.email-ops-frontend.rule=Host(`email-ops.magicunicorn.dev`)"
+      - "traefik.http.routers.email-ops-frontend.entrypoints=websecure"
+      - "traefik.http.routers.email-ops-frontend.tls=true"
+      - "traefik.http.routers.email-ops-frontend.tls.certresolver=letsencrypt"
+      - "traefik.http.services.email-ops-frontend.loadbalancer.server.port=3000"
+    networks: [email-ops-internal, web]
+
+volumes:
+  email-ops-pgdata:
+
+networks:
+  email-ops-internal:
+    driver: bridge
+  web:
+    external: true
+  unicorn-network:
+    external: true
