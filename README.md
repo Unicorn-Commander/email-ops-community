@@ -17,11 +17,6 @@ Email-Ops is the app that **fronts the Apache James mail server** (JMAP) for mai
 
 <p align="center"><em>Email-Ops command center — mailboxes, agent inbox, and chain-of-command email</em></p>
 
-<p align="center">
-  <img src="docs/screenshots/live.png" alt="Live product surface" width="900" />
-</p>
-
-<p align="center"><em>Live product surface</em></p>
 
 Live: **[email-ops.unicorncommander.ai](https://email-ops.unicorncommander.ai)**
 
