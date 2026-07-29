@@ -8,6 +8,24 @@ Email-Ops is the app that **fronts the Apache James mail server** (JMAP) for mai
 
 **Golden rule:** *federate the engine, don't reinvent a mail server.* A cockpit (e.g. Customer-Ops) federates Email-Ops over MCP **by `workspace_id`** — it never runs a mail server, never stores a message body, never copies a thread.
 
+
+## Screenshots
+
+<p align="center">
+  <img src="docs/screenshots/product.png" alt="Email-Ops command center — mailboxes, agent inbox, and chain-of-command email" width="900" />
+</p>
+
+<p align="center"><em>Email-Ops command center — mailboxes, agent inbox, and chain-of-command email</em></p>
+
+<p align="center">
+  <img src="docs/screenshots/live.png" alt="Live product surface" width="900" />
+</p>
+
+<p align="center"><em>Live product surface</em></p>
+
+Live: **[email-ops.unicorncommander.ai](https://email-ops.unicorncommander.ai)**
+
+---
 ## Agent Email Command Center
 
 The `/mail` surface is a full webmail client run **with a human in the loop over an agent fleet**:
